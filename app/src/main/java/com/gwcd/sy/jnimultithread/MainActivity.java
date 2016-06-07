@@ -8,6 +8,7 @@ import android.util.Log;
 import android.view.View;
 import android.widget.TextView;
 
+import com.gwcd.sy.clib.LatLng;
 import com.gwcd.sy.clib.LibTest;
 
 public class MainActivity extends AppCompatActivity {
@@ -22,6 +23,14 @@ public class MainActivity extends AppCompatActivity {
             String strMsg = "event:" + msg.what + ", handle:" + msg.arg1 + ", err_no:" + msg.arg2;
             Log.d(TAG, strMsg);
             mTvPrint.setText(strMsg);
+            switch (msg.what) {
+                case LibTest.UE_GET_LATLNG:
+                    LatLng[] pos = LibTest.getLatLngData();
+                    if (pos != null && pos.length > 0) {
+                        Log.d(TAG, "getLatLngData! pos.length:" + pos.length);
+                    }
+                    break;
+            }
         }
     };
 
@@ -41,10 +50,13 @@ public class MainActivity extends AppCompatActivity {
     }
 
     public void onCallJni(View view) {
-        LibTest.LongTimeTask();
+        LatLng[] pos = LibTest.LongTimeTask();
+        if (pos != null && pos.length > 0) {
+            Log.d(TAG, "onCallJni: pos.length" + pos.length);
+        }
     }
 
     public void onCallJniMT(View view) {
-        LibTest.LongTimeTask2();
+        LibTest.simulateEvent();
     }
 }

@@ -7,6 +7,7 @@ package com.gwcd.sy.clib;
 
 import android.os.Handler;
 import android.os.Message;
+import android.util.Log;
 
 /**
  * 类描述：<br>
@@ -16,6 +17,11 @@ import android.os.Message;
  */
 public class LibTest {
 
+    public static final int UE_BEGIN = 0;
+
+    public static final int UE_INFO_MODIFY = UE_BEGIN + 4;
+    public static final int UE_GET_LATLNG = UE_BEGIN + 5;
+
     static {
         System.loadLibrary("test");
     }
@@ -23,6 +29,15 @@ public class LibTest {
     public static Handler mHandler;
 
     private static void JniCallback(int event, int handle, int err_no) {
+        Log.d("JniCallback", "JniCallback event:" + event);
+        if (UE_INFO_MODIFY == event) {
+            LongTimeTask2();
+            return;
+        }
+        passEvent(event, handle, err_no);
+    }
+
+    private static void passEvent(int event, int handle, int err_no) {
         if (mHandler != null) {
             Message msg = mHandler.obtainMessage();
             msg.what = event;
@@ -34,9 +49,13 @@ public class LibTest {
 
     public static native void nativeInit();
 
-    public static native void LongTimeTask();
+    public static native LatLng[] LongTimeTask();
 
     public static native void LongTimeTask2();
+
+    public static native LatLng[] getLatLngData();
+
+    public static native void simulateEvent();
 
     public static native void nativeRelease();
 }

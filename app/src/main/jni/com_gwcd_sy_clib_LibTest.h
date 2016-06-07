@@ -22,14 +22,14 @@ JNIEXPORT void JNICALL Java_com_gwcd_sy_clib_LibTest_nativeInit
  * Signature: ()V
  */
 JNIEXPORT void JNICALL Java_com_gwcd_sy_clib_LibTest_nativeRelease
-    (JNIEnv *, jclass);
+  (JNIEnv *, jclass);
 
 /*
  * Class:     com_gwcd_sy_clib_LibTest
  * Method:    LongTimeTask
- * Signature: ()V
+ * Signature: ()[Lcom/gwcd/sy/clib/LatLng;
  */
-JNIEXPORT void JNICALL Java_com_gwcd_sy_clib_LibTest_LongTimeTask
+JNIEXPORT jobjectArray JNICALL Java_com_gwcd_sy_clib_LibTest_LongTimeTask
   (JNIEnv *, jclass);
 
 /*
@@ -38,7 +38,23 @@ JNIEXPORT void JNICALL Java_com_gwcd_sy_clib_LibTest_LongTimeTask
  * Signature: ()V
  */
 JNIEXPORT void JNICALL Java_com_gwcd_sy_clib_LibTest_LongTimeTask2
-    (JNIEnv *, jclass);
+  (JNIEnv *, jclass);
+
+/*
+ * Class:     com_gwcd_sy_clib_LibTest
+ * Method:    getLatLngData
+ * Signature: ()[Lcom/gwcd/sy/clib/LatLng;
+ */
+JNIEXPORT jobjectArray JNICALL Java_com_gwcd_sy_clib_LibTest_getLatLngData
+  (JNIEnv *, jclass);
+
+/*
+ * Class:     com_gwcd_sy_clib_LibTest
+ * Method:    simulateEvent
+ * Signature: ()V
+ */
+JNIEXPORT void JNICALL Java_com_gwcd_sy_clib_LibTest_simulateEvent
+  (JNIEnv *, jclass);
 
 #ifdef __cplusplus
 }

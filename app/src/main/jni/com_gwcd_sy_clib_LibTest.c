@@ -1,10 +1,12 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <unistd.h>
+#include <sys/types.h>
 #include <pthread.h>
 #include <string.h>
 #include "com_gwcd_sy_clib_LibTest.h"
 #include "AndroidLog.h"
+#include "JniEvent.h"
 
 #define DEF_DELAY 1
 
@@ -16,11 +18,13 @@
 一旦启动线程，用AttachCurrentThread方法获得在当前线程有效的env。
 2.通过JavaVM*和JNIEnv可以查找到jclass。
 3.把jclass转成全局引用，使其跨线程。
-4.delete掉创建的全局引用和调用DetachCurrentThread方法。
+4.free掉创建的全局引用和调用DetachCurrentThread方法。
 */
 static JavaVM* g_jvm = NULL;
 
 // 全局使用的变量，在进入JNI接口时用NewGlobalRef保存起来
+static jclass g_class = NULL;
+
 static jclass g_clazz = NULL;
 
 // 全局使用的变量，在进入JNI接口时用NewGlobalRef保存起来
@@ -28,12 +32,12 @@ static jobject g_object = NULL;
 
 static pthread_mutex_t g_mutex;
 
+static jobjectArray g_pos_array;
+
+/** 传给线程的参数结构体 */
 typedef struct long_time_func_param {
-
     unsigned char* thread_name;
-
     int err;
-
 } thread_param_t;
 
 /*
@@ -67,7 +71,7 @@ JNIEXPORT void JNICALL Java_com_gwcd_sy_clib_LibTest_nativeRelease
 }
 
 /** 在子线程中执行的耗时方法 */
-void* long_time_func(void * args)
+void* long_time_task(void * args)
 {
 
     if (0 != pthread_mutex_lock(&g_mutex)) {
@@ -86,19 +90,37 @@ void* long_time_func(void * args)
         LOGD("%s", param->thread_name);
         // 等待3秒，模拟耗时操作
         sleep(DEF_DELAY);
-        LOGD("sleep 3s finish");
+        LOGD("sleep %ds finish", DEF_DELAY);
+
+        int temp_size = 1000;
+        //jclass obj_cls = (*env)->FindClass(env, "com/gwcd/sy/clib/LatLng");
+        jfieldID latID = (*env)->GetFieldID(env, g_class, "latitude", "D");
+        jfieldID lngID = (*env)->GetFieldID(env, g_class, "longitude", "D");
+        jmethodID initID = (*env)->GetMethodID(env, g_class, "<init>", "()V");
+
+        jobjectArray posArray = (*env)->NewObjectArray(env, temp_size, g_class, NULL);
+        int i;
+        for (i = 0; i < temp_size; ++i) {
+            jobject pos = (*env)->NewObject(env, g_class, initID);
+            (*env)->SetDoubleField(env, pos, latID, 30.69198167);
+            (*env)->SetDoubleField(env, pos, lngID, 103.95621167);
+            (*env)->SetObjectArrayElement(env, posArray, i, pos);
+
+            (*env)->DeleteLocalRef(env, pos);
+        }
+        //(*env)->DeleteLocalRef(env, obj_cls);
+
+        g_pos_array = (*env)->NewGlobalRef(env, posArray);
 
         jmethodID methodID = (*env)->GetStaticMethodID(env, g_clazz, "JniCallback", "(III)V");
-        (*env)->CallStaticVoidMethod(env, g_clazz, methodID, 4, 1677217, param->err); // 模拟返回一些测试数据
-
-
+        (*env)->CallStaticVoidMethod(env, g_clazz, methodID, UE_GET_LATLNG, 1677217, param->err); // 模拟返回一些测试数据
 
         // 将线程从Java虚拟机上剥离
         (*g_jvm)->DetachCurrentThread(g_jvm);
         free(param);
         // TODO:复杂的代码结构下，g_clazz/g_object全局变量的释放问题
 
-        LOGD("finish LongTimeTask");
+        LOGD("finish long_time_func");
     } else {
         LOGE("AttachCurrentThread fail");
     }
@@ -121,15 +143,38 @@ jint JNI_OnLoad(JavaVM* vm, void* reserved)
 /*
  * Class:     com_gwcd_sy_clib_LibTest
  * Method:    LongTimeTask
- * Signature: ()V
+ * Signature: ()[Lcom/gwcd/sy/clib/LatLng;
  */
-JNIEXPORT void JNICALL Java_com_gwcd_sy_clib_LibTest_LongTimeTask(JNIEnv *env, jclass clazz)
+JNIEXPORT jobjectArray JNICALL Java_com_gwcd_sy_clib_LibTest_LongTimeTask
+    (JNIEnv *env, jclass clazz)
 {
+    int temp_size = 16000;
     LOGD("into LongTimeTask");
-    // 模拟耗时，会阻塞主线程
+    jclass obj_cls = (*env)->FindClass(env, "com/gwcd/sy/clib/LatLng");
+    jfieldID latID = (*env)->GetFieldID(env, obj_cls, "latitude", "D");
+    jfieldID lngID = (*env)->GetFieldID(env, obj_cls, "longitude", "D");
+    jmethodID initID = (*env)->GetMethodID(env, obj_cls, "<init>", "()V");
+
+    jobjectArray posArray = (*env)->NewObjectArray(env, temp_size, obj_cls, NULL);
+    int i;
+    for (i = 0; i < temp_size; ++i) {
+        jobject pos = (*env)->NewObject(env, obj_cls, initID);
+        (*env)->SetDoubleField(env, pos, latID, 30.69198167);
+        (*env)->SetDoubleField(env, pos, lngID, 103.95621167);
+        (*env)->SetObjectArrayElement(env, posArray, i, pos);
+
+        (*env)->DeleteLocalRef(env, pos);
+    }
+    (*env)->DeleteLocalRef(env, obj_cls);
+
     sleep(DEF_DELAY);
-    jmethodID methodID = (*env)->GetStaticMethodID(env, clazz, "JniCallback", "(III)V");
-    (*env)->CallStaticVoidMethod(env, clazz, methodID, 4, 1677217, 1);
+    LOGD("finish LongTimeTask");
+    return posArray;
+
+    // 模拟耗时，会阻塞主线程
+    //sleep(DEF_DELAY);
+    //jmethodID methodID = (*env)->GetStaticMethodID(env, clazz, "JniCallback", "(III)V");
+    //(*env)->CallStaticVoidMethod(env, clazz, methodID, 4, 1677217, 1);
 }
 
 /*
@@ -137,17 +182,22 @@ JNIEXPORT void JNICALL Java_com_gwcd_sy_clib_LibTest_LongTimeTask(JNIEnv *env, j
  * Method:    LongTimeTask2
  * Signature: ()V
  */
-JNIEXPORT void JNICALL Java_com_gwcd_sy_clib_LibTest_LongTimeTask2(JNIEnv *env, jclass clazz)
+JNIEXPORT void JNICALL Java_com_gwcd_sy_clib_LibTest_LongTimeTask2
+    (JNIEnv *env, jclass clazz)
 {
+    LOGD("into LongTimeTask2.");
+    g_clazz = (jclass)(*env)->NewGlobalRef(env, clazz);
     /**
     env->GetJavaVM(&g_jvm); //保存到全局变量中JVM
     //如果是传入jobject，应该调用以下函数，创建可以在其他线程中使用的引用:
     g_object=env->NewGlobalRef(obj);
     */
     // 创建全局引用
-    g_clazz = (jclass)(*env)->NewGlobalRef(env, clazz);
+    /*
+
     LOGD("into LongTimeTask2");
     int i;
+    pthread_t threads[10];
     for (i = 0; i < 10; ++i) {
         thread_param_t* param = (thread_param_t*) malloc(sizeof(thread_param_t));
         memset(param, 0, sizeof(thread_param_t));
@@ -157,13 +207,71 @@ JNIEXPORT void JNICALL Java_com_gwcd_sy_clib_LibTest_LongTimeTask2(JNIEnv *env, 
         pthread_t thread;
         pthread_attr_t p_attr;
         pthread_attr_init(&p_attr);
-        // TODO:设置调度策略
-
-        int n = pthread_create(&thread, &p_attr, (void *)long_time_func, (void *)param);//启动线程，调用run_task方法
+        int n = pthread_create(&threads[i], &p_attr, (void *)long_time_task, (void *)param);
+        if ( geteuid() == 0 ) {
+            // TODO:设置调度策略,用户虚拟机测试，虚拟机是root权限
+            // 线程的调度有三种策略：SCHED_OTHER、SCHED_RR和SCHED_FIFO。默认是SCHED_OTHER，这种策略是抢占式的
+            // SCHED_RR和SCHED_FIFO只能在超级用户下运行?
+            struct sched_param *sch_param = (struct sched_param *) malloc(sizeof(struct sched_param));
+            memset(sch_param, 0, sizeof(struct sched_param));
+            sch_param->sched_priority = 50;
+            pthread_setschedparam(threads[i], SCHED_FIFO, sch_param);
+        } else {
+            LOGE("不是超级用户");
+        }
+        pthread_attr_destroy(&p_attr);
         if (n != 0) {
             LOGE("线程创建失败");
         } else {
             LOGD("线程创建成功");
         }
     }
+    */
+    // pthread_join用来等待一个线程的结束,线程间同步的操作。如果有需要。但是join的后果还是会造成主线程阻塞。
+    // pthread_join(pthread_t thread, void **retval);
+    /*
+    for (i = 0; i < 10; ++i) {
+        pthread_join(threads[i], NULL);
+    }*/
+    jclass obj_cls = (*env)->FindClass(env, "com/gwcd/sy/clib/LatLng");
+    if (obj_cls == NULL) {
+        LOGE("obj_cls创建失败");
+    }
+    g_class = (*env)->NewGlobalRef(env, obj_cls);
+    thread_param_t* param = (thread_param_t*) malloc(sizeof(thread_param_t));
+    memset(param, 0, sizeof(thread_param_t));
+    param->thread_name = (unsigned char*)malloc(255);
+    sprintf(param->thread_name, "thread id:1");
+    param->err = 0;
+    pthread_t thread;
+    int n = pthread_create(&thread, NULL, (void *)long_time_task, (void *)param);
+    if (n != 0) {
+        LOGE("线程创建失败");
+    } else {
+        LOGD("线程创建成功");
+    }
+    LOGD("LongTimeTask2 finish.");
+}
+
+/*
+ * Class:     com_gwcd_sy_clib_LibTest
+ * Method:    getLatLngData
+ * Signature: ()[Lcom/gwcd/sy/clib/LatLng;
+ */
+JNIEXPORT jobjectArray JNICALL Java_com_gwcd_sy_clib_LibTest_getLatLngData
+  (JNIEnv *env, jclass clazz)
+{
+    return g_pos_array;
+}
+
+/*
+ * Class:     com_gwcd_sy_clib_LibTest
+ * Method:    simulateEvent
+ * Signature: ()V
+ */
+JNIEXPORT void JNICALL Java_com_gwcd_sy_clib_LibTest_simulateEvent
+  (JNIEnv *env, jclass clazz)
+{
+    jmethodID methodID = (*env)->GetStaticMethodID(env, clazz, "JniCallback", "(III)V");
+    (*env)->CallStaticVoidMethod(env, clazz, methodID, UE_INFO_MODIFY, 1677217, 0);
 }
