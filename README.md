@@ -1,0 +1,2 @@
+# JniMultiThread
+一个Android上层调用jni创建POSIX线程模拟耗时操作的demo。用于学习jni和pthread相关API。
