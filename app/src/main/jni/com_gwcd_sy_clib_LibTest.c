@@ -23,12 +23,9 @@
 static JavaVM* g_jvm = NULL;
 
 // 全局使用的变量，在进入JNI接口时用NewGlobalRef保存起来
-static jclass g_class = NULL;
+static jclass g_obj_class = NULL;
 
 static jclass g_clazz = NULL;
-
-// 全局使用的变量，在进入JNI接口时用NewGlobalRef保存起来
-static jobject g_object = NULL;
 
 static pthread_mutex_t g_mutex;
 
@@ -82,44 +79,50 @@ void* long_time_task(void * args)
     LOGD("into long_time_func");
     JNIEnv *env = NULL;
 
-    // 必须调用,将当前线程附加到Java虚拟机上，并或得JNIEnv指针
+    // 将当前线程附加到Java虚拟机上，并获得当前线程相关的JNIEnv指针
     if ((*g_jvm)->AttachCurrentThread(g_jvm, &env, NULL) == 0) {
         LOGD("AttachCurrentThread success");
         thread_param_t* param = (thread_param_t*) args;
 
         LOGD("%s", param->thread_name);
-        // 等待3秒，模拟耗时操作
+        // 等待，模拟耗时操作
         sleep(DEF_DELAY);
         LOGD("sleep %ds finish", DEF_DELAY);
 
-        int temp_size = 1000;
-        //jclass obj_cls = (*env)->FindClass(env, "com/gwcd/sy/clib/LatLng");
-        jfieldID latID = (*env)->GetFieldID(env, g_class, "latitude", "D");
-        jfieldID lngID = (*env)->GetFieldID(env, g_class, "longitude", "D");
-        jmethodID initID = (*env)->GetMethodID(env, g_class, "<init>", "()V");
+        int temp_size = 16000;
+        /* 这样通过线程的env会找不到class
+        jclass g_obj_class = (*env)->FindClass(env, "com/gwcd/sy/clib/LatLng");
+        if (g_obj_class == NULL) {
+            LOGE("obj_cls null");
+        }*/
+        jfieldID latID = (*env)->GetFieldID(env, g_obj_class, "latitude", "D");
+        jfieldID lngID = (*env)->GetFieldID(env, g_obj_class, "longitude", "D");
+        jmethodID initID = (*env)->GetMethodID(env, g_obj_class, "<init>", "()V");
 
-        jobjectArray posArray = (*env)->NewObjectArray(env, temp_size, g_class, NULL);
+        jobjectArray posArray = (*env)->NewObjectArray(env, temp_size, g_obj_class, NULL);
         int i;
         for (i = 0; i < temp_size; ++i) {
-            jobject pos = (*env)->NewObject(env, g_class, initID);
+            jobject pos = (*env)->NewObject(env, g_obj_class, initID);
             (*env)->SetDoubleField(env, pos, latID, 30.69198167);
             (*env)->SetDoubleField(env, pos, lngID, 103.95621167);
             (*env)->SetObjectArrayElement(env, posArray, i, pos);
 
             (*env)->DeleteLocalRef(env, pos);
         }
-        //(*env)->DeleteLocalRef(env, obj_cls);
-
         g_pos_array = (*env)->NewGlobalRef(env, posArray);
+        (*env)->DeleteLocalRef(env, posArray);
 
+        /** 回调上层，通知数据已经准备好了 */
         jmethodID methodID = (*env)->GetStaticMethodID(env, g_clazz, "JniCallback", "(III)V");
-        (*env)->CallStaticVoidMethod(env, g_clazz, methodID, UE_GET_LATLNG, 1677217, param->err); // 模拟返回一些测试数据
+        (*env)->CallStaticVoidMethod(env, g_clazz, methodID, UE_GET_LATLNG, 1677217, param->err);
+
+        // TODO:复杂的代码结构下，g_clazz/g_object全局变量的释放问题
+        (*env)->DeleteGlobalRef(env, g_obj_class);
+        (*env)->DeleteGlobalRef(env, g_clazz);
 
         // 将线程从Java虚拟机上剥离
         (*g_jvm)->DetachCurrentThread(g_jvm);
         free(param);
-        // TODO:复杂的代码结构下，g_clazz/g_object全局变量的释放问题
-
         LOGD("finish long_time_func");
     } else {
         LOGE("AttachCurrentThread fail");
@@ -134,8 +137,7 @@ void* long_time_task(void * args)
 
 jint JNI_OnLoad(JavaVM* vm, void* reserved)
 {
-    LOGD("into JNI_OnLoad");
-    g_jvm = vm;
+    g_jvm = vm; // 保存JavaVM全局引用
 
     return JNI_VERSION_1_4;
 }
@@ -148,6 +150,7 @@ jint JNI_OnLoad(JavaVM* vm, void* reserved)
 JNIEXPORT jobjectArray JNICALL Java_com_gwcd_sy_clib_LibTest_LongTimeTask
     (JNIEnv *env, jclass clazz)
 {
+    // 这个方法模拟一次在主线程上的耗时调用
     int temp_size = 16000;
     LOGD("into LongTimeTask");
     jclass obj_cls = (*env)->FindClass(env, "com/gwcd/sy/clib/LatLng");
@@ -170,11 +173,61 @@ JNIEXPORT jobjectArray JNICALL Java_com_gwcd_sy_clib_LibTest_LongTimeTask
     sleep(DEF_DELAY);
     LOGD("finish LongTimeTask");
     return posArray;
+}
 
-    // 模拟耗时，会阻塞主线程
-    //sleep(DEF_DELAY);
-    //jmethodID methodID = (*env)->GetStaticMethodID(env, clazz, "JniCallback", "(III)V");
-    //(*env)->CallStaticVoidMethod(env, clazz, methodID, 4, 1677217, 1);
+/** 创建线程加载数据 */
+void get_data_by_thread(JNIEnv *env, jclass clazz)
+{
+    // 缓存需要的全局引用
+    g_clazz = (jclass)(*env)->NewGlobalRef(env, clazz);
+    jclass obj_cls = (*env)->FindClass(env, "com/gwcd/sy/clib/LatLng");
+    g_obj_class = (*env)->NewGlobalRef(env, obj_cls);
+    /**** 构造线程相关参数 ****/
+    thread_param_t* param = (thread_param_t*) malloc(sizeof(thread_param_t));
+    memset(param, 0, sizeof(thread_param_t));
+    param->thread_name = (unsigned char*)malloc(255);
+    memset(param->thread_name, 0, 255);
+    sprintf(param->thread_name, "thread id:1");
+    param->err = 0;
+    /**** 构造线程参数结束，创建子线程 ****/
+    pthread_t thread;
+    int n = pthread_create(&thread, NULL, (void *)long_time_task, (void *)param);
+    if (n != 0) {
+        LOGE("线程创建失败");
+    } else {
+        LOGD("线程创建成功");
+    }
+}
+
+void get_data_directly(JNIEnv *env, jclass clazz)
+{
+    int temp_size = 16000;
+    LOGD("into get_data_directly");
+    jclass obj_cls = (*env)->FindClass(env, "com/gwcd/sy/clib/LatLng");
+    jfieldID latID = (*env)->GetFieldID(env, obj_cls, "latitude", "D");
+    jfieldID lngID = (*env)->GetFieldID(env, obj_cls, "longitude", "D");
+    jmethodID initID = (*env)->GetMethodID(env, obj_cls, "<init>", "()V");
+
+    jobjectArray posArray = (*env)->NewObjectArray(env, temp_size, obj_cls, NULL);
+    int i;
+    for (i = 0; i < temp_size; ++i) {
+        jobject pos = (*env)->NewObject(env, obj_cls, initID);
+        (*env)->SetDoubleField(env, pos, latID, 30.69198167);
+        (*env)->SetDoubleField(env, pos, lngID, 103.95621167);
+        (*env)->SetObjectArrayElement(env, posArray, i, pos);
+
+        (*env)->DeleteLocalRef(env, pos);
+    }
+    (*env)->DeleteLocalRef(env, obj_cls);
+    g_pos_array = (*env)->NewGlobalRef(env, posArray);
+    (*env)->DeleteLocalRef(env, posArray);
+
+    sleep(DEF_DELAY);
+
+    /** 回调上层，通知数据已经准备好了 */
+    jmethodID methodID = (*env)->GetStaticMethodID(env, clazz, "JniCallback", "(III)V");
+    (*env)->CallStaticVoidMethod(env, clazz, methodID, UE_GET_LATLNG, 1677217, 0);
+    LOGD("finish get_data_directly");
 }
 
 /*
@@ -186,7 +239,11 @@ JNIEXPORT void JNICALL Java_com_gwcd_sy_clib_LibTest_LongTimeTask2
     (JNIEnv *env, jclass clazz)
 {
     LOGD("into LongTimeTask2.");
-    g_clazz = (jclass)(*env)->NewGlobalRef(env, clazz);
+    //get_data_by_thread(env, clazz);
+    get_data_directly(env, clazz);
+    LOGD("LongTimeTask2 finish.");
+
+
     /**
     env->GetJavaVM(&g_jvm); //保存到全局变量中JVM
     //如果是传入jobject，应该调用以下函数，创建可以在其他线程中使用的引用:
@@ -233,24 +290,6 @@ JNIEXPORT void JNICALL Java_com_gwcd_sy_clib_LibTest_LongTimeTask2
     for (i = 0; i < 10; ++i) {
         pthread_join(threads[i], NULL);
     }*/
-    jclass obj_cls = (*env)->FindClass(env, "com/gwcd/sy/clib/LatLng");
-    if (obj_cls == NULL) {
-        LOGE("obj_cls创建失败");
-    }
-    g_class = (*env)->NewGlobalRef(env, obj_cls);
-    thread_param_t* param = (thread_param_t*) malloc(sizeof(thread_param_t));
-    memset(param, 0, sizeof(thread_param_t));
-    param->thread_name = (unsigned char*)malloc(255);
-    sprintf(param->thread_name, "thread id:1");
-    param->err = 0;
-    pthread_t thread;
-    int n = pthread_create(&thread, NULL, (void *)long_time_task, (void *)param);
-    if (n != 0) {
-        LOGE("线程创建失败");
-    } else {
-        LOGD("线程创建成功");
-    }
-    LOGD("LongTimeTask2 finish.");
 }
 
 /*
@@ -272,6 +311,7 @@ JNIEXPORT jobjectArray JNICALL Java_com_gwcd_sy_clib_LibTest_getLatLngData
 JNIEXPORT void JNICALL Java_com_gwcd_sy_clib_LibTest_simulateEvent
   (JNIEnv *env, jclass clazz)
 {
+    // 模拟一个通知上层刷新数据的事件，由app按键触发
     jmethodID methodID = (*env)->GetStaticMethodID(env, clazz, "JniCallback", "(III)V");
     (*env)->CallStaticVoidMethod(env, clazz, methodID, UE_INFO_MODIFY, 1677217, 0);
 }

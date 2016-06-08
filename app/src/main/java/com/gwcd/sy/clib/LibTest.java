@@ -31,7 +31,9 @@ public class LibTest {
     private static void JniCallback(int event, int handle, int err_no) {
         Log.d("JniCallback", "JniCallback event:" + event);
         if (UE_INFO_MODIFY == event) {
-            LongTimeTask2();
+            DataThread dataTh = new DataThread();
+            dataTh.start();
+//            LongTimeTask2();
             return;
         }
         passEvent(event, handle, err_no);
@@ -58,4 +60,12 @@ public class LibTest {
     public static native void simulateEvent();
 
     public static native void nativeRelease();
+
+    private static class DataThread extends Thread {
+        @Override
+        public void run() {
+            Log.d("SY", "DataThread run.");
+            LongTimeTask2();
+        }
+    }
 }
